@@ -1,0 +1,51 @@
+# Core bot framework
+python-telegram-bot>=21.0
+
+# Async HTTP and database
+aiohttp>=3.9
+aiosqlite>=0.19
+
+# Bluesky integration
+atproto>=0.0.55
+
+# Environment and image handling
+python-dotenv>=1.0
+Pillow>=10.0
+
+# LLM inference (llama.cpp)
+# Install with CUDA: CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
+llama-cpp-python>=0.2.0
+
+# Embeddings (EmbeddingGemma)
+sentence-transformers>=3.0
+numpy>=1.24
+
+# Vector search for SQLite
+sqlite-vec>=0.1.0
+
+# Caching
+cachetools>=5.3
+
+# Audio processing (TTS)
+pydub>=0.25
+
+# TTS - Chatterbox-Turbo
+# Install: pip install chatterbox-tts
+# Or from source: pip install git+https://github.com/resemble-ai/chatterbox.git
+chatterbox-tts>=0.1.0
+
+# Scheduling (2 AM fine-tuning job)
+apscheduler>=3.10
+
+# Fine-tuning (LoRA)
+# Note: These have heavy dependencies. Install separately if needed:
+# pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+peft>=0.11
+transformers>=4.40
+datasets>=2.18
+accelerate>=0.30
+
+# PyTorch (required for embeddings, TTS, fine-tuning)
+# Install appropriate version for your CUDA setup:
+# pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.0
