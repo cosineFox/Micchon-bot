@@ -1,13 +1,13 @@
 import aiosqlite
 import json
 import logging
-import sqlite_vec
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
 from contextlib import asynccontextmanager
 
 from .models import Memory, Journal
+from .qdrant_client import get_qdrant_store, QdrantMemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -15,18 +15,35 @@ logger = logging.getLogger(__name__)
 class MasterRepository:
     """Repository for memory.db - master database with all finalized memories and journals"""
 
-    def __init__(self, db_path: Path, embedding_dimension: int = 256):
+    def __init__(
+        self,
+        db_path: Path,
+        embedding_dimension: int = 384,
+        qdrant_host: str = "localhost",
+        qdrant_port: int = 6333
+    ):
         self.db_path = db_path
         self.embedding_dimension = embedding_dimension
+        self.qdrant_host = qdrant_host
+        self.qdrant_port = qdrant_port
+        self._qdrant: Optional[QdrantMemoryStore] = None
+
+    async def _get_qdrant(self) -> QdrantMemoryStore:
+        """Get or create Qdrant store"""
+        if self._qdrant is None:
+            self._qdrant = get_qdrant_store(
+                host=self.qdrant_host,
+                port=self.qdrant_port,
+                embedding_dimension=self.embedding_dimension
+            )
+            await self._qdrant.init()
+        return self._qdrant
 
     @asynccontextmanager
     async def _get_db(self):
-        """Get a connection to the database with sqlite-vec loaded"""
+        """Get a connection to the database"""
         db = await aiosqlite.connect(self.db_path)
         try:
-            await db.enable_load_extension(True)
-            # Load sqlite-vec extension
-            await db.execute("SELECT load_extension(?)", [sqlite_vec.loadable_path()])
             yield db
         finally:
             await db.close()
@@ -57,20 +74,6 @@ class MasterRepository:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-
-            # Vector embeddings table (will be created via sqlite-vec)
-            # Note: sqlite-vec uses vec0() virtual table
-            try:
-                await db.execute(f"""
-                    CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings
-                    USING vec0(
-                        id TEXT PRIMARY KEY,
-                        embedding FLOAT[{self.embedding_dimension}]
-                    )
-                """)
-            except Exception as e:
-                # sqlite-vec might not be installed yet
-                print(f"Warning: Could not create vector table: {e}")
 
             # Compiled journals table
             await db.execute("""
@@ -153,18 +156,23 @@ class MasterRepository:
                 )
             )
 
-            # Insert embedding if provided
-            if embedding:
-                try:
-                    embedding_str = "[" + ",".join(map(str, embedding)) + "]"
-                    await db.execute(
-                        "INSERT INTO memory_embeddings (id, embedding) VALUES (?, ?)",
-                        (memory.id, embedding_str)
-                    )
-                except Exception as e:
-                    print(f"Warning: Could not insert embedding: {e}")
-
             await db.commit()
+
+        # Insert embedding into Qdrant if provided
+        if embedding:
+            try:
+                qdrant = await self._get_qdrant()
+                await qdrant.add_embedding(
+                    memory_id=memory.id,
+                    embedding=embedding,
+                    metadata={
+                        "type": memory.type,
+                        "timestamp": memory.timestamp.isoformat()
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Could not insert embedding to Qdrant: {e}")
+
         return memory
 
     async def get_recent(self, hours: int = 24, limit: int = 50) -> list[Memory]:
@@ -203,32 +211,37 @@ class MasterRepository:
         return memories
 
     async def search_similar(self, query_embedding: list[float], limit: int = 10) -> list[Memory]:
-        """Search for semantically similar memories using vector similarity"""
+        """Search for semantically similar memories using Qdrant vector similarity"""
         try:
+            qdrant = await self._get_qdrant()
+            results = await qdrant.search_similar(query_embedding, limit=limit)
+
+            if not results:
+                return []
+
+            # Fetch full memory objects from SQLite
+            memory_ids = [memory_id for memory_id, score in results]
+            memories = []
+
             async with self._get_db() as db:
                 db.row_factory = aiosqlite.Row
-
-                # Use sqlite-vec for similarity search
-                embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+                placeholders = ",".join("?" * len(memory_ids))
 
                 async with db.execute(
-                    f"""SELECT m.* FROM memories m
-                       JOIN (
-                           SELECT id,
-                                  vec_distance_cosine(embedding, ?) as distance
-                           FROM memory_embeddings
-                           ORDER BY distance
-                           LIMIT ?
-                       ) e ON m.id = e.id
-                       ORDER BY e.distance""",
-                    (embedding_str, limit)
+                    f"SELECT * FROM memories WHERE id IN ({placeholders})",
+                    memory_ids
                 ) as cursor:
-                    memories = []
                     async for row in cursor:
                         memories.append(self._row_to_memory(row))
-                    return memories
+
+            # Sort by original Qdrant ranking
+            id_to_score = {mid: score for mid, score in results}
+            memories.sort(key=lambda m: id_to_score.get(m.id, 0), reverse=True)
+
+            return memories
+
         except Exception as e:
-            print(f"Warning: Vector search failed: {e}")
+            logger.warning(f"Vector search failed: {e}")
             # Fallback to recent memories
             return await self.get_recent(hours=168, limit=limit)  # Last week
 
@@ -302,41 +315,51 @@ class MasterRepository:
     async def delete_old_embeddings(self, days: int = 90):
         """Delete embeddings for memories older than specified days"""
         cutoff = datetime.now() - timedelta(days=days)
+        old_ids = []
 
         async with self._get_db() as db:
-            await db.execute(
-                """DELETE FROM memory_embeddings
-                   WHERE id IN (
-                       SELECT id FROM memories
-                       WHERE timestamp < ?
-                   )""",
+            async with db.execute(
+                "SELECT id FROM memories WHERE timestamp < ?",
                 (cutoff.isoformat(),)
-            )
-            await db.commit()
+            ) as cursor:
+                async for row in cursor:
+                    old_ids.append(row[0])
+
+        if old_ids:
+            try:
+                qdrant = await self._get_qdrant()
+                await qdrant.delete_old_embeddings(old_ids)
+            except Exception as e:
+                logger.warning(f"Failed to delete embeddings from Qdrant: {e}")
 
     async def cleanup_old_memories(self, days: int = 90):
         """Clean up old memories based on AUTO_CLEANUP_DAYS setting from config"""
         cutoff = datetime.now() - timedelta(days=days)
+        old_ids = []
 
         async with self._get_db() as db:
-            # Delete old embeddings first
-            await db.execute(
-                """DELETE FROM memory_embeddings
-                   WHERE id IN (
-                       SELECT id FROM memories
-                       WHERE timestamp < ?
-                   )""",
+            async with db.execute(
+                "SELECT id FROM memories WHERE timestamp < ?",
                 (cutoff.isoformat(),)
-            )
+            ) as cursor:
+                async for row in cursor:
+                    old_ids.append(row[0])
 
-            # Delete old memories
+        if old_ids:
+            try:
+                qdrant = await self._get_qdrant()
+                await qdrant.delete_old_embeddings(old_ids)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup Qdrant embeddings: {e}")
+
+        async with self._get_db() as db:
             await db.execute(
                 "DELETE FROM memories WHERE timestamp < ?",
                 (cutoff.isoformat(),)
             )
             await db.commit()
 
-        logger.info(f"Cleaned up memories older than {days} days")
+        logger.info(f"Cleaned up {len(old_ids)} memories older than {days} days")
 
     def _row_to_memory(self, row: aiosqlite.Row) -> Memory:
         """Convert database row to Memory object"""

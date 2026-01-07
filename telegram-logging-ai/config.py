@@ -99,6 +99,10 @@ EMBEDDING_DIMENSION = 384           # all-MiniLM-L6-v2 native dimension (fast)
 EMBEDDING_TASK = "search result"    # Task prompt (only used for EmbeddingGemma)
 EMBEDDING_USE_GPU = True            # Use CUDA for embeddings if available
 
+# Qdrant settings (run: docker run -p 6333:6333 qdrant/qdrant)
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+
 # Performance settings
 ENABLE_STREAMING = True             # Stream LLM responses
 BATCH_EMBEDDINGS = True             # Batch embedding generation

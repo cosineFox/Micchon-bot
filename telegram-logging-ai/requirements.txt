@@ -19,8 +19,12 @@ sentence-transformers>=3.0.0
 torchaudio>=2.0.0
 pydub>=0.25.0
 
-# Vector search
-sqlite-vec>=0.1.0
+# Vector search - Qdrant (run: docker run -p 6333:6333 qdrant/qdrant)
+qdrant-client>=1.7.0
+
+# OCR - Also install system package: brew install tesseract (macOS) or apt install tesseract-ocr (Linux)
+pytesseract>=0.3.10
+easyocr>=1.7.0
 
 # Bluesky
 atproto>=0.0.55
