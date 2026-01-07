@@ -1,10 +1,15 @@
 import aiosqlite
 import json
+import logging
+import sqlite_vec
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
+from contextlib import asynccontextmanager
 
 from .models import Memory, Journal
+
+logger = logging.getLogger(__name__)
 
 
 class MasterRepository:
@@ -13,6 +18,18 @@ class MasterRepository:
     def __init__(self, db_path: Path, embedding_dimension: int = 256):
         self.db_path = db_path
         self.embedding_dimension = embedding_dimension
+
+    @asynccontextmanager
+    async def _get_db(self):
+        """Get a connection to the database with sqlite-vec loaded"""
+        db = await aiosqlite.connect(self.db_path)
+        try:
+            await db.enable_load_extension(True)
+            # Load sqlite-vec extension
+            await db.execute("SELECT load_extension(?)", [sqlite_vec.loadable_path()])
+            yield db
+        finally:
+            await db.close()
 
     async def _apply_optimizations(self, db: aiosqlite.Connection):
         """Apply SQLite PRAGMA optimizations for performance"""
@@ -24,7 +41,7 @@ class MasterRepository:
 
     async def init_db(self):
         """Initialize master database schema with optimizations"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             await self._apply_optimizations(db)
 
             # Main memories table
@@ -117,7 +134,7 @@ class MasterRepository:
             metadata=metadata
         )
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             await self._apply_optimizations(db)
 
             # Insert memory
@@ -155,7 +172,7 @@ class MasterRepository:
         cutoff = datetime.now() - timedelta(hours=hours)
         memories = []
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT * FROM memories
@@ -172,7 +189,7 @@ class MasterRepository:
         """Get memories filtered by type"""
         memories = []
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT * FROM memories
@@ -188,7 +205,7 @@ class MasterRepository:
     async def search_similar(self, query_embedding: list[float], limit: int = 10) -> list[Memory]:
         """Search for semantically similar memories using vector similarity"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
+            async with self._get_db() as db:
                 db.row_factory = aiosqlite.Row
 
                 # Use sqlite-vec for similarity search
@@ -232,7 +249,7 @@ class MasterRepository:
             markdown_path=markdown_path
         )
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             await self._apply_optimizations(db)
 
             await db.execute(
@@ -256,7 +273,7 @@ class MasterRepository:
         """Get recent compiled journals"""
         journals = []
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM journals ORDER BY created_at DESC LIMIT ?",
@@ -274,7 +291,7 @@ class MasterRepository:
         set_clause = ", ".join(f"{k} = ?" for k in kwargs.keys())
         values = list(kwargs.values()) + [journal_id]
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             result = await db.execute(
                 f"UPDATE journals SET {set_clause} WHERE id = ?",
                 values
@@ -286,7 +303,7 @@ class MasterRepository:
         """Delete embeddings for memories older than specified days"""
         cutoff = datetime.now() - timedelta(days=days)
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             await db.execute(
                 """DELETE FROM memory_embeddings
                    WHERE id IN (
@@ -296,6 +313,30 @@ class MasterRepository:
                 (cutoff.isoformat(),)
             )
             await db.commit()
+
+    async def cleanup_old_memories(self, days: int = 90):
+        """Clean up old memories based on AUTO_CLEANUP_DAYS setting from config"""
+        cutoff = datetime.now() - timedelta(days=days)
+
+        async with self._get_db() as db:
+            # Delete old embeddings first
+            await db.execute(
+                """DELETE FROM memory_embeddings
+                   WHERE id IN (
+                       SELECT id FROM memories
+                       WHERE timestamp < ?
+                   )""",
+                (cutoff.isoformat(),)
+            )
+
+            # Delete old memories
+            await db.execute(
+                "DELETE FROM memories WHERE timestamp < ?",
+                (cutoff.isoformat(),)
+            )
+            await db.commit()
+
+        logger.info(f"Cleaned up memories older than {days} days")
 
     def _row_to_memory(self, row: aiosqlite.Row) -> Memory:
         """Convert database row to Memory object"""
@@ -323,7 +364,7 @@ class MasterRepository:
 
     async def get_memory_count(self) -> int:
         """Get total number of memories"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             async with db.execute("SELECT COUNT(*) FROM memories") as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row else 0
@@ -333,7 +374,7 @@ class MasterRepository:
         from uuid import uuid4
         feedback_id = str(uuid4())
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             await db.execute(
                 "INSERT INTO feedback (id, memory_id, rating, context) VALUES (?, ?, ?, ?)",
                 (feedback_id, memory_id, rating, context)
@@ -345,7 +386,7 @@ class MasterRepository:
         """Get highly-rated examples for fine-tuning"""
         examples = []
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._get_db() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT m.*, f.rating, f.context as feedback_context

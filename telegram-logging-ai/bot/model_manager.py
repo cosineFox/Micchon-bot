@@ -29,6 +29,7 @@ class ModelManager:
         self.llama_params = llama_params
         self.warmup_prompt = warmup_prompt
         self._model: Optional[Llama] = None
+        self._vision_model: Optional[Llama] = None
         self._lock = asyncio.Lock()
 
     async def load_model(self) -> Llama:
@@ -60,6 +61,46 @@ class ModelManager:
             except Exception as e:
                 logger.error(f"Failed to load model: {e}")
                 raise
+
+    async def load_vision_model(self, model_path: Path, projector_path: Path) -> Llama:
+        """
+        Load a separate vision model (VLM)
+        """
+        async with self._lock:
+            if self._vision_model is not None:
+                return self._vision_model
+
+            logger.info(f"Loading vision model from {model_path} with projector {projector_path}")
+            try:
+                loop = asyncio.get_event_loop()
+                
+                def _load_vlm():
+                    from llama_cpp import Llama
+                    # Try to use Moondream/LLaVA handler depending on autodetection or config
+                    # For generic GGUF VLMs with mmproj, we usually use Llava15ChatHandler
+                    # or rely on llama-cpp-python's auto-config if chat_handler is passed
+                    from llama_cpp.llama_chat_format import Llava15ChatHandler
+                    
+                    chat_handler = Llava15ChatHandler(clip_model_path=str(projector_path))
+                    
+                    return Llama(
+                        model_path=str(model_path),
+                        chat_handler=chat_handler,
+                        n_ctx=2048, # Vision context
+                        n_gpu_layers=-1, # GPU offload
+                        verbose=False
+                    )
+
+                self._vision_model = await loop.run_in_executor(None, _load_vlm)
+                logger.info("Vision model loaded successfully")
+                return self._vision_model
+
+            except Exception as e:
+                logger.error(f"Failed to load vision model: {e}")
+                raise
+
+    async def get_vision_model(self) -> Optional[Llama]:
+        return self._vision_model
 
     async def unload_model(self):
         """
@@ -149,6 +190,21 @@ class ModelManager:
         await self.warmup()
 
         logger.info("Model hot-swap complete")
+
+    async def update_model_from_path(self, model_path: Path):
+        """
+        Update the model to use a different model file
+
+        Args:
+            model_path: Path to the new model file
+        """
+        if self.model_path != model_path:
+            logger.info(f"Updating model path from {self.model_path} to {model_path}")
+            self.model_path = model_path
+
+            # If model is currently loaded, reload it
+            if self.is_loaded():
+                await self.reload_model(model_path)
 
     def is_loaded(self) -> bool:
         """Check if model is currently loaded"""

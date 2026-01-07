@@ -169,52 +169,53 @@ class LlamaClient:
     async def describe_image(
         self,
         image_path: Path,
-        prompt: str = "Describe this image in detail.",
-        max_tokens: int = 300
+        prompt: str = "Describe this image."
     ) -> str:
         """
-        Generate image description using vision model
-
-        Args:
-            image_path: Path to image file
-            prompt: Vision prompt
-            max_tokens: Max tokens for description
-
-        Returns:
-            Image description text
+        Generate image description using LLaVA/multimodal model
         """
-        model = await self.model_manager.get_model()
+        # Check for dedicated vision model first
+        vision_model = await self.model_manager.get_vision_model()
+        
+        if vision_model:
+            model = vision_model
+            logger.info("Using dedicated vision model")
+        else:
+            model = await self.model_manager.get_model()
+            logger.info("Using main model for vision")
 
-        logger.info(f"Describing image: {image_path}")
+        try:
+            # Helper to run in thread
+            def _generate():
+                # Convert image path to base64 data URI format for llama-cpp
+                import base64
+                
+                with open(image_path, "rb") as f:
+                    img_b64 = base64.b64encode(f.read()).decode("utf-8")
+                
+                image_url = f"data:image/jpeg;base64,{img_b64}"
 
-        # Build vision chat message
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"file://{image_path.absolute()}"}
-                    }
-                ]
-            }
-        ]
+                response = model.create_chat_completion(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {"type": "image_url", "image_url": {"url": image_url}}
+                            ]
+                        }
+                    ],
+                    max_tokens=self.gen_params.get("max_tokens", 512),
+                    temperature=0.7
+                )
+                return response["choices"][0]["message"]["content"]
 
-        # Generate description
-        params = self.gen_params.copy()
-        params["max_tokens"] = max_tokens
-        params["stream"] = False
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, _generate)
 
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: model.create_chat_completion(messages=messages, **params)
-        )
-
-        description = response["choices"][0]["message"]["content"].strip()
-        logger.debug(f"Generated description: {len(description)} chars")
-        return description
+        except Exception as e:
+            logger.error(f"Image description failed: {e}")
+            return f"[Error processing image: {e}]"
 
     async def count_tokens(self, text: str) -> int:
         """

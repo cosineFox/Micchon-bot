@@ -33,8 +33,9 @@ The project features a unified memory system where all interactions are stored a
 - **Automatic Improvement**: Continuous fine-tuning based on user feedback
 - **Dual-Purpose Design**: Functions as both a personal companion and a logging tool
 - **Export Capabilities**: Compiles journal entries into markdown articles with AI-generated summaries
-- **Bluesky Integration**: Automatic posting with AI-polished content
+- **Bluesky Integration**: Optional posting with AI-polished content (only posting functionality, no reading from timeline)
 - **Voice Responses**: TTS with paralinguistics support ([laugh], [sigh], [chuckle], etc.)
+- **Privacy-Focused**: Telegram access restricted to allowed users only, Bluesky credentials optional
 
 ## File Structure
 
@@ -122,7 +123,7 @@ Micchon/
 | `/journal cancel` | Exit journal mode, discard entries |
 | `/journal status` | Show current journal session info |
 | `/journal preview` | Preview entries before compiling |
-| `/bsky <text>` | Post to Bluesky (AI-polished) |
+| `/bsky <text>` | Post to Bluesky (AI-polished) - requires credentials in .env |
 | `/voice` | Toggle voice responses on/off |
 | `/rate <1-5>` | Rate the last AI response |
 | `/status` | Show system status |
@@ -142,6 +143,12 @@ Micchon/
 2. **Vision Model**: Verify GGUF includes multimodal support for image description
 3. **Memory Cleanup**: AUTO_CLEANUP_DAYS logic not yet implemented
 4. **Error Recovery**: Journal session recovery after crash not fully tested
+
+## Privacy Considerations
+
+- **Telegram Access**: The bot is designed to be personal and only responds to users in the `TELEGRAM_ALLOWED_USERS` list in the .env file. This is intentional for privacy and security.
+- **Bluesky Integration**: The bot only supports posting to your Bluesky account (not reading from it). Credentials are optional and can be left blank if you don't want this functionality.
+- **Data Storage**: All data is stored locally in SQLite databases (journal.db and memory.db) on your device.
 
 ## Project Status
 

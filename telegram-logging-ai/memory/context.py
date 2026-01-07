@@ -1,6 +1,9 @@
 from datetime import datetime
 from typing import Optional
 import logging
+import hashlib
+
+from cachetools import TTLCache
 
 from .models import Memory, Journal, WaifuContext
 from .master_repo import MasterRepository
@@ -8,9 +11,20 @@ from .embedder import get_embedder
 
 logger = logging.getLogger(__name__)
 
+# Cache for semantic search results (avoid re-searching same queries)
+_search_cache = TTLCache(maxsize=50, ttl=300)  # 5 min TTL
+
 
 class ContextBuilder:
-    """Builds optimized context windows for waifu responses"""
+    """
+    Builds optimized context windows for waifu responses.
+
+    RAG-optimized: caches search results, skips embedding for short queries,
+    and balances recency with relevance.
+    """
+
+    # Minimum query length for semantic search (shorter = skip embedding)
+    MIN_QUERY_LENGTH_FOR_SEARCH = 10
 
     def __init__(
         self,
@@ -109,12 +123,26 @@ class ContextBuilder:
         return combined
 
     async def _search_relevant(self, query: str) -> list[Memory]:
-        """Search for semantically relevant memories"""
-        if not query.strip():
+        """
+        Search for semantically relevant memories with caching.
+
+        Skips embedding for very short queries (saves compute).
+        """
+        query = query.strip()
+
+        # Skip semantic search for very short queries (not worth embedding)
+        if len(query) < self.MIN_QUERY_LENGTH_FOR_SEARCH:
+            logger.debug(f"Query too short for semantic search: {len(query)} chars")
             return []
 
+        # Check cache first (normalized query as key)
+        cache_key = hashlib.md5(query.lower().encode()).hexdigest()[:16]
+        if cache_key in _search_cache:
+            logger.debug("Semantic search cache hit")
+            return _search_cache[cache_key]
+
         try:
-            # Generate query embedding
+            # Generate query embedding (cached in embedder)
             query_embedding = await self.embedder.embed(query)
 
             # Search for similar memories
@@ -123,8 +151,9 @@ class ContextBuilder:
                 limit=self.max_relevant_memories
             )
 
-            # Filter out memories that are already in recent
-            # (deduplication happens in WaifuContext.get_all_memories)
+            # Cache the result
+            _search_cache[cache_key] = relevant
+
             return relevant
 
         except Exception as e:

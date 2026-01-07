@@ -10,6 +10,7 @@ from .bluesky_client import BlueskyClient, get_bluesky_client
 from .handlers import Handlers
 from .fine_tuner import FineTuner, get_fine_tuner
 from .scheduler import TaskScheduler, get_scheduler
+from .keyword_manager import KeywordManager, get_keyword_manager
 
 __all__ = [
     "ModelManager",
@@ -29,4 +30,6 @@ __all__ = [
     "get_fine_tuner",
     "TaskScheduler",
     "get_scheduler",
+    "KeywordManager",
+    "get_keyword_manager",
 ]

@@ -59,15 +59,20 @@ class Handlers:
 
         self.image_dir.mkdir(parents=True, exist_ok=True)
 
-    def _is_authorized(self, user_id: int) -> bool:
-        """Check if user is authorized"""
+    def _is_authorized(self, update: Update) -> bool:
+        """Check if chat is authorized"""
+        # If no users/chats configured, deny all for security
         if not self.allowed_users:
-            return True
-        return user_id in self.allowed_users
+            return False
+            
+        if not update.effective_chat:
+            return False
+            
+        return update.effective_chat.id in self.allowed_users
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
-        if not self._is_authorized(update.effective_user.id):
+        if not self._is_authorized(update):
             return
 
         help_text = """**Welcome!**
@@ -100,7 +105,7 @@ Just send me a message to chat!"""
 
     async def cmd_journal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /journal commands"""
-        if not self._is_authorized(update.effective_user.id):
+        if not self._is_authorized(update):
             return
 
         user_id = update.effective_user.id
@@ -212,7 +217,7 @@ Just send me a message to chat!"""
 
     async def cmd_bsky(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /bsky command - post to Bluesky"""
-        if not self._is_authorized(update.effective_user.id):
+        if not self._is_authorized(update):
             return
 
         if self.journal.is_journal_mode(update.effective_user.id):
@@ -247,7 +252,7 @@ Just send me a message to chat!"""
 
     async def cmd_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /voice command - toggle voice responses"""
-        if not self._is_authorized(update.effective_user.id):
+        if not self._is_authorized(update):
             return
 
         self.tts_enabled = not self.tts_enabled
@@ -256,7 +261,7 @@ Just send me a message to chat!"""
 
     async def cmd_rate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /rate command - rate last response"""
-        if not self._is_authorized(update.effective_user.id):
+        if not self._is_authorized(update):
             return
 
         user_id = update.effective_user.id
@@ -285,7 +290,7 @@ Just send me a message to chat!"""
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /status command"""
-        if not self._is_authorized(update.effective_user.id):
+        if not self._is_authorized(update):
             return
 
         user_id = update.effective_user.id
@@ -305,7 +310,7 @@ Just send me a message to chat!"""
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages - mode-dependent behavior"""
-        if not self._is_authorized(update.effective_user.id):
+        if not self._is_authorized(update):
             return
 
         user_id = update.effective_user.id
@@ -321,7 +326,7 @@ Just send me a message to chat!"""
 
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle photo messages"""
-        if not self._is_authorized(update.effective_user.id):
+        if not self._is_authorized(update):
             return
 
         user_id = update.effective_user.id
@@ -354,9 +359,23 @@ Just send me a message to chat!"""
             # Normal mode: describe and respond
             await update.message.reply_text("Looking at your image...")
 
-            response, voice_path, memory_id = await self.waifu.respond_to_image(
-                image_path, user_id, caption, with_voice=self.tts_enabled
-            )
+            # Check if waifu has OCR capabilities
+            if hasattr(self.waifu, 'respond_to_image'):
+                response, memory_id = await self.waifu.respond_to_image(
+                    image_path, user_id, caption
+                )
+                voice_path = None  # No TTS in this implementation
+            else:
+                # Fallback for standard waifu
+                description = await self.waifu.describe_image(image_path, caption)
+                await update.message.reply_text("Processing...")
+
+                response, memory_id = await self.waifu.respond(
+                    f"I just shared an image. {description}",
+                    user_id,
+                    stream=False
+                )
+                voice_path = None
 
             self._last_response[user_id] = memory_id
 

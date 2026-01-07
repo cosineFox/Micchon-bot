@@ -51,9 +51,60 @@ class JournalModeManager:
 
     async def start_monitoring(self):
         """Start background monitoring for idle sessions"""
+        # Check for any existing journal entries that might indicate a crash recovery
+        await self._recover_crashed_sessions()
+
         if self._monitor_task is None:
             self._monitor_task = asyncio.create_task(self._monitor_sessions())
             logger.info("Journal session monitoring started")
+
+    async def _recover_crashed_sessions(self):
+        """Recover from any journal sessions that were active during a crash"""
+        # Check if there are any entries in journal.db that might indicate an active session
+        entry_count = await self.repo.get_entry_count()
+        if entry_count > 0:
+            logger.info(f"Found {entry_count} entries in journal.db - checking for crashed sessions")
+
+            # Get all entries to identify which users have entries
+            all_entries = await self.repo.get_all_entries()
+
+            # Group entries by user_id to identify which users have active sessions
+            user_entries = {}
+            for entry in all_entries:
+                # For now, we'll need to get the user_id from the database since it's not in the JournalEntry model
+                # We'll query the database directly for entries with user_id
+                pass  # We'll implement this logic below
+
+            # Query database directly to get user_ids with entries
+            async with aiosqlite.connect(self.repo.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    "SELECT DISTINCT user_id FROM journal_entries WHERE user_id IS NOT NULL"
+                ) as cursor:
+                    async for row in cursor:
+                        user_id = row["user_id"]
+                        if user_id:
+                            # Create a session state for this user to indicate they have entries
+                            if user_id not in self._sessions:
+                                session = SessionState(user_id=user_id, mode="journal")
+                                session.start_journal()  # Mark as in journal mode
+                                self._sessions[user_id] = session
+                                logger.info(f"Recovered journal session for user {user_id}")
+
+                                # Update last activity to prevent immediate idle warnings
+                                self._last_activity[user_id] = datetime.now()
+                                self._idle_warned.discard(user_id)
+
+        # Also check for entries without user_id (old entries) and assign to default user if needed
+        # This handles the case where we have entries but don't know which user they belong to
+        async with aiosqlite.connect(self.repo.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT COUNT(*) as count FROM journal_entries WHERE user_id IS NULL"
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row["count"] > 0:
+                    logger.info(f"Found {row['count']} entries without user_id - these may need manual recovery")
 
     async def stop_monitoring(self):
         """Stop background monitoring"""
@@ -174,7 +225,7 @@ class JournalModeManager:
             Created journal entry
         """
         entry = JournalEntry.create(type="text", content=content)
-        await self.repo.add_entry(entry)
+        await self.repo.add_entry(entry, user_id)
 
         self._last_activity[user_id] = datetime.now()
         self._idle_warned.discard(user_id)
@@ -208,7 +259,7 @@ class JournalModeManager:
         )
         entry.image_description = description
 
-        await self.repo.add_entry(entry)
+        await self.repo.add_entry(entry, user_id)
 
         self._last_activity[user_id] = datetime.now()
         self._idle_warned.discard(user_id)

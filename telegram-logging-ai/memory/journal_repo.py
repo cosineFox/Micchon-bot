@@ -23,28 +23,33 @@ class JournalRepository:
                     content TEXT NOT NULL,
                     media_path TEXT,
                     image_description TEXT,
+                    user_id INTEGER,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_journal_timestamp ON journal_entries(timestamp DESC)"
             )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_journal_user_id ON journal_entries(user_id)"
+            )
             await db.commit()
 
-    async def add_entry(self, entry: JournalEntry) -> JournalEntry:
+    async def add_entry(self, entry: JournalEntry, user_id: int = None) -> JournalEntry:
         """Add a new journal entry"""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 """INSERT INTO journal_entries
-                   (id, timestamp, type, content, media_path, image_description)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (id, timestamp, type, content, media_path, image_description, user_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     entry.id,
                     entry.timestamp.isoformat(),
                     entry.type,
                     entry.content,
                     entry.media_path,
-                    entry.image_description
+                    entry.image_description,
+                    user_id
                 )
             )
             await db.commit()
@@ -57,6 +62,26 @@ class JournalRepository:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM journal_entries ORDER BY timestamp ASC"
+            ) as cursor:
+                async for row in cursor:
+                    entries.append(JournalEntry(
+                        id=row["id"],
+                        timestamp=datetime.fromisoformat(row["timestamp"]),
+                        type=row["type"],
+                        content=row["content"],
+                        media_path=row["media_path"],
+                        image_description=row["image_description"]
+                    ))
+        return entries
+
+    async def get_entries_by_user(self, user_id: int) -> list[JournalEntry]:
+        """Get all entries for a specific user, ordered by timestamp"""
+        entries = []
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM journal_entries WHERE user_id = ? ORDER BY timestamp ASC",
+                (user_id,)
             ) as cursor:
                 async for row in cursor:
                     entries.append(JournalEntry(
@@ -93,6 +118,27 @@ class JournalRepository:
                         media_path=row["media_path"],
                         image_description=row["image_description"]
                     )
+        return None
+
+    async def get_latest_entry_with_user(self) -> Optional[tuple[JournalEntry, Optional[int]]]:
+        """Get the most recent entry with its user_id"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT *, user_id FROM journal_entries ORDER BY timestamp DESC LIMIT 1"
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    entry = JournalEntry(
+                        id=row["id"],
+                        timestamp=datetime.fromisoformat(row["timestamp"]),
+                        type=row["type"],
+                        content=row["content"],
+                        media_path=row["media_path"],
+                        image_description=row["image_description"]
+                    )
+                    user_id = row["user_id"]
+                    return entry, user_id
         return None
 
     async def update_entry(self, entry_id: str, **kwargs) -> bool:

@@ -14,11 +14,16 @@ Pillow>=10.0
 
 # LLM inference (llama.cpp)
 # Install with CUDA: CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
+# For Raspberry Pi (ARM64): pip install llama-cpp-python -v --no-cache-dir --force-reinstall --no-deps --compile
 llama-cpp-python>=0.2.0
 
-# Embeddings (EmbeddingGemma)
+# Embeddings (Qwen3 and general)
 sentence-transformers>=3.0
 numpy>=1.24
+
+# OCR for image text extraction
+pytesseract>=0.3.10
+Pillow>=10.0
 
 # Vector search for SQLite
 sqlite-vec>=0.1.0
@@ -29,7 +34,7 @@ cachetools>=5.3
 # Audio processing (TTS)
 pydub>=0.25
 
-# TTS - Chatterbox-Turbo
+# TTS - Chatterbox-Turbo (optional, may be disabled for Pi)
 # Install: pip install chatterbox-tts
 # Or from source: pip install git+https://github.com/resemble-ai/chatterbox.git
 chatterbox-tts>=0.1.0
@@ -37,7 +42,7 @@ chatterbox-tts>=0.1.0
 # Scheduling (2 AM fine-tuning job)
 apscheduler>=3.10
 
-# Fine-tuning (LoRA)
+# Fine-tuning (LoRA) - may be disabled for Pi efficiency
 # Note: These have heavy dependencies. Install separately if needed:
 # pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 peft>=0.11
@@ -46,6 +51,5 @@ datasets>=2.18
 accelerate>=0.30
 
 # PyTorch (required for embeddings, TTS, fine-tuning)
-# Install appropriate version for your CUDA setup:
-# pip install torch --index-url https://download.pytorch.org/whl/cu121
+# For Raspberry Pi: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 torch>=2.0

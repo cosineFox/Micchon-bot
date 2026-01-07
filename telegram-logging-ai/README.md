@@ -130,12 +130,17 @@ Edit `.env`:
 ```bash
 # Required
 TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
-TELEGRAM_ALLOWED_USERS=123456789  # Your Telegram user ID
+TELEGRAM_ALLOWED_USERS=123456789  # Your Telegram user ID (comma-separated for multiple users)
 
-# Optional (for Bluesky integration)
+# Optional (for Bluesky posting - leave blank to disable)
+# NOTE: Only posting functionality is implemented, not reading from your timeline
 BLUESKY_HANDLE=your.handle.bsky.social
 BLUESKY_APP_PASSWORD=your_app_password
 ```
+
+**Note about privacy:**
+- **Telegram access**: The bot is designed to be personal, so it only responds to users in the `TELEGRAM_ALLOWED_USERS` list. This is intentional for privacy.
+- **Bluesky integration**: The bot only posts to your Bluesky account (not read from it). Leave credentials blank if you don't want this functionality.
 
 **Getting your Telegram user ID:**
 1. Message [@userinfobot](https://t.me/userinfobot) on Telegram
@@ -160,7 +165,7 @@ python -m bot.main
 | `/journal cancel` | Exit journal mode, discard entries |
 | `/journal status` | Show current journal session info |
 | `/journal preview` | Preview entries before compiling |
-| `/bsky <text>` | Post to Bluesky (AI-polished) |
+| `/bsky <text>` | Post to Bluesky (AI-polished) - requires credentials in .env |
 | `/voice` | Toggle voice responses on/off |
 | `/rate <1-5>` | Rate the last AI response |
 | `/status` | Show system status |

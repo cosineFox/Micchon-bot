@@ -6,10 +6,13 @@ load_dotenv()
 
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_ALLOWED_USERS = [
+# List of allowed Chat IDs (can be User IDs for private chats or Group IDs)
+# Handles empty strings gracefully
+_allowed_ids_str = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "")
+TELEGRAM_ALLOWED_CHAT_IDS = [
     int(uid.strip())
-    for uid in os.getenv("TELEGRAM_ALLOWED_USERS", "").split(",")
-    if uid.strip()
+    for uid in _allowed_ids_str.split(",")
+    if uid.strip() and (uid.strip().isdigit() or (uid.strip().startswith("-") and uid.strip()[1:].isdigit()))
 ]
 
 # Bluesky
@@ -31,7 +34,16 @@ JOURNAL_DB_PATH = DATA_DIR / "journal.db"  # Temporary journal drafts
 
 # Model paths (GGUF files)
 MAIN_MODEL_PATH = MODELS_DIR / "gemma-3n-e4b-q4_k_m.gguf"
-EMBED_MODEL_NAME = "google/embeddinggemma-300m"  # HuggingFace model
+VISION_MODEL_PATH = MODELS_DIR / "SmolVLM2-500M-Video-Instruct-Q8_0.gguf"
+VISION_PROJECTOR_PATH = MODELS_DIR / "mmproj-SmolVLM2-500M-Video-Instruct-f16.gguf"
+EMBEDDING_MODEL_PATH = MODELS_DIR / "nomic-embed-text-v1.5.Q4_K_M.gguf"
+
+# Embedding model - optimized for RAG speed
+# Options:
+#   - "sentence-transformers/all-MiniLM-L6-v2" (80MB, 384d) - FAST default
+#   - "google/embeddinggemma-300m" (300MB, 768d) - High quality, slower
+#   - "nomic-ai/nomic-embed-text-v1.5" - Good balance
+EMBED_MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"  # Identifier for logic, path is above
 
 # llama.cpp parameters (optimized for RTX 3060 12GB)
 LLAMA_PARAMS = {
@@ -82,14 +94,15 @@ SEMANTIC_SEARCH_LIMIT = 5           # Max relevant memories
 EMBEDDING_CACHE_SIZE = 100          # LRU cache for embeddings
 RESPONSE_CACHE_TTL = 300            # 5 min cache for responses
 
-# Embedding settings (EmbeddingGemma)
-EMBEDDING_DIMENSION = 256           # Use MRL for speed (768 for quality)
-EMBEDDING_TASK = "search result"    # Task prompt for semantic search
+# Embedding settings
+EMBEDDING_DIMENSION = 384           # all-MiniLM-L6-v2 native dimension (fast)
+EMBEDDING_TASK = "search result"    # Task prompt (only used for EmbeddingGemma)
+EMBEDDING_USE_GPU = True            # Use CUDA for embeddings if available
 
 # Performance settings
 ENABLE_STREAMING = True             # Stream LLM responses
 BATCH_EMBEDDINGS = True             # Batch embedding generation
-AUTO_CLEANUP_DAYS = 90              # Delete old embeddings after N days
+AUTO_CLEANUP_DAYS = 90              # Delete old memories after N days
 
 # Image settings
 MAX_IMAGE_DIMENSION = 2048          # Auto-resize larger images
@@ -97,8 +110,9 @@ JPEG_QUALITY = 85                   # Compression quality (1-100)
 AUTO_COMPRESS_IMAGES = True         # Always compress on upload
 
 # TTS settings (Chatterbox-Turbo)
-TTS_ENABLED = True                  # Enable voice responses
-TTS_VOICE_SAMPLE = None             # Path to voice sample for cloning (optional)
+# Defaults to False for safety, set to True in .env or Docker to enable
+TTS_ENABLED = os.getenv("TTS_ENABLED", "False").lower() == "true"
+TTS_VOICE_SAMPLE = os.getenv("TTS_VOICE_SAMPLE")  # Path to voice sample for cloning (optional)
 TTS_PARALINGUISTICS = True          # Use [laugh], [chuckle] tags
 TTS_SEND_AS_VOICE = True            # Send as Telegram voice message
 
@@ -107,7 +121,9 @@ JOURNAL_IDLE_WARNING_MINUTES = 60   # Warn after 1 hour idle
 JOURNAL_AUTO_COMPILE_HOURS = 24     # Auto-compile after 24 hours
 
 # Fine-tuning settings (Reinforcement Learning)
-FINE_TUNE_ENABLED = True            # Enable automatic fine-tuning
+# NOTE: Disabled by default - too resource intensive for most hardware
+# Enable only if you have 24GB+ VRAM and want automatic model improvement
+FINE_TUNE_ENABLED = os.getenv("FINE_TUNE_ENABLED", "False").lower() == "true"
 FINE_TUNE_HOUR = 2                  # Run at 2 AM daily
 FINE_TUNE_MIN_EXAMPLES = 50         # Minimum examples needed
 FINE_TUNE_MIN_RATING = 4            # Only use 4-5 star examples

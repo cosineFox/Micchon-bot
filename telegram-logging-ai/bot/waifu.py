@@ -5,6 +5,7 @@ import logging
 
 from .llama_client import LlamaClient
 from .tts_client import TTSClient
+from .keyword_manager import get_keyword_manager
 from memory.context import ContextBuilder
 from memory.master_repo import MasterRepository
 from memory.models import WaifuContext
@@ -41,6 +42,7 @@ class Waifu:
         self.personality = personality
         self.tts = tts_client
         self.tts_enabled = tts_enabled and tts_client is not None
+        self.keyword_manager = get_keyword_manager()
 
     async def respond(
         self,
@@ -63,6 +65,9 @@ class Waifu:
         """
         logger.info(f"Generating response for user {user_id}")
 
+        # Check if we should respond randomly based on keywords
+        should_respond_randomly = await self.keyword_manager.should_respond_randomly(message)
+
         # Store user message as memory
         await self.repo.add_memory(
             type="chat",
@@ -79,34 +84,38 @@ class Waifu:
         # Build system prompt with context
         system_prompt = self._build_system_prompt(context_str)
 
-        # Generate response
-        if stream:
-            return self._stream_response(message, system_prompt, user_id)
+        # If we should respond randomly based on keywords, generate a random response
+        if should_respond_randomly:
+            response = await self._generate_random_response(message, system_prompt)
         else:
-            response = await self.llm.generate(
-                prompt=message,
-                system=system_prompt,
-                stream=False
-            )
+            # Generate normal response using LLM
+            if stream:
+                return self._stream_response(message, system_prompt, user_id)
+            else:
+                response = await self.llm.generate(
+                    prompt=message,
+                    system=system_prompt,
+                    stream=False
+                )
 
-            # Store assistant response as memory
-            memory = await self.repo.add_memory(
-                type="chat",
-                content=response,
-                metadata={"role": "assistant", "user_id": user_id}
-            )
+        # Store assistant response as memory
+        memory = await self.repo.add_memory(
+            type="chat",
+            content=response,
+            metadata={"role": "assistant", "user_id": user_id}
+        )
 
-            # Generate voice if requested
-            voice_path = None
-            if with_voice and self.tts_enabled:
-                try:
-                    voice_path = await self.tts.text_to_voice_message(response)
-                except Exception as e:
-                    logger.error(f"TTS failed: {e}")
+        # Generate voice if requested
+        voice_path = None
+        if with_voice and self.tts_enabled:
+            try:
+                voice_path = await self.tts.text_to_voice_message(response)
+            except Exception as e:
+                logger.error(f"TTS failed: {e}")
 
-            if with_voice:
-                return response, voice_path, memory.id
-            return response, memory.id
+        if with_voice:
+            return response, voice_path, memory.id
+        return response, memory.id
 
     async def _stream_response(
         self,
@@ -146,6 +155,33 @@ Remember to:
 - Be genuinely caring, not performatively
 - Keep responses warm but concise
 """
+
+    async def _generate_random_response(self, message: str, system_prompt: str) -> str:
+        """
+        Generate a random response based on keywords in the message using the LLM
+        """
+        logger.info(f"Generating random response triggered by keywords in: {message[:50]}...")
+
+        # Create a prompt for the LLM to generate a natural response based on the keywords
+        llm_prompt = f"""The user mentioned something related to '{message[:30]}...'.
+Generate a warm, natural response that acknowledges this topic but feels organic and not forced.
+Keep it brief but caring, showing you're paying attention.
+Do not repeat what the user said, just acknowledge it naturally."""
+
+        # Generate response using the LLM with the full system prompt (including personality and context)
+        response = await self.llm.generate(
+            prompt=llm_prompt,
+            system=system_prompt,
+            max_tokens=80,
+            temperature=0.8
+        )
+
+        # Update keyword usage statistics
+        relevant_keywords = await self.keyword_manager.get_relevant_keywords(message)
+        for keyword in relevant_keywords:
+            await self.keyword_manager.increment_keyword_usage(keyword)
+
+        return response
 
     async def describe_image(
         self,

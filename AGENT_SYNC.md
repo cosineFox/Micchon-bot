@@ -12,18 +12,15 @@ These markdown files in `/Micchon/` root are the shared space for coordinating b
 | File | Purpose |
 |------|---------|
 | `AGENT_SYNC.md` | **THIS FILE** - Implementation status, current state, handoff notes |
-| `PRD.md` | Product requirements document - full architecture spec |
-| `INIT.md` | Setup/initialization instructions |
-| `MAINTENANCE.md` | Maintenance tasks and test cases |
+| `PROJECT_HANDBOOK.md` | **MASTER DOC** - Consolidated PRD, Setup, Maintenance, and Logs |
 | `telegram-logging-ai/README.md` | User-facing documentation for the bot |
 
 ### Project Structure
 ```
 Micchon/                     # Root - shared agent files here
 ├── AGENT_SYNC.md            # Agent coordination (THIS FILE)
-├── PRD.md                   # Product requirements
-├── INIT.md                  # Setup instructions
-├── MAINTENANCE.md           # Test cases & maintenance
+├── PROJECT_HANDBOOK.md      # Consolidated Documentation
+├── watchdog.sh              # Process Supervisor
 └── telegram-logging-ai/     # Telegram bot project
     ├── bot/
     ├── memory/
@@ -41,13 +38,19 @@ Micchon/                     # Root - shared agent files here
 
 ### Currently Working On
 <!-- Add your agent ID and what you're working on -->
-- Agent: _none_
-- Task: _none_
-- Started: _none_
+- Agent: Gemini CLI
+- Task: Final verification and handoff
+- Started: 2026-01-07 15:40 (approx)
 
 ### Handoff Notes
 <!-- Add notes for the next agent here -->
-- 2026-01-07: All implementation complete. Ready for testing/debugging phase.
+- 2026-01-07: Implemented robust security and maintenance features.
+  - Changed access control to `TELEGRAM_ALLOWED_CHAT_IDS` (supports groups).
+  - Added `MaintenanceManager` for daily `VACUUM INTO` backups and integrity checks (2:30 AM).
+  - Added `watchdog.sh` for process self-healing.
+  - Added `Dockerfile` for Python 3.11 compatibility (resolves Chatterbox issues).
+  - Global error handling added to `main.py`.
+  - **Action Required:** User needs to set `TELEGRAM_ALLOWED_CHAT_IDS` in `.env`.
 
 ---
 
@@ -127,8 +130,8 @@ Tech Stack:
 2. **CUDA Installation**: `llama-cpp-python` must be compiled with CUDA support
 3. **TTS**: Chatterbox may need source install: `pip install git+https://github.com/resemble-ai/chatterbox.git`
 4. **sqlite-vec**: May need manual install on some platforms
-5. **Telegram Bot**: Create bot via @BotFather, add token to `.env`
-6. **Bluesky**: Optional - add credentials to `.env` if needed
+5. **Telegram Bot**: Create bot via @BotFather, add token to `.env` (bot only responds to users in TELEGRAM_ALLOWED_USERS)
+6. **Bluesky**: Optional - add credentials to `.env` if needed (only posting functionality, no reading from timeline)
 
 ---
 
@@ -136,10 +139,16 @@ Tech Stack:
 
 1. **LoRA → GGUF Merging**: Fine-tuner creates LoRA adapters but doesn't merge back to GGUF yet
 2. **Vision Model**: Verify GGUF includes multimodal support for image description
-3. **Memory Cleanup**: `AUTO_CLEANUP_DAYS` logic not yet implemented
+3. ~~**Memory Cleanup**: `AUTO_CLEANUP_DAYS` logic not yet implemented~~ ✅ FIXED - scheduler now runs cleanup at 3 AM
 4. **Error Recovery**: Journal session recovery after crash not fully tested
 
 ---
+
+## Privacy Considerations
+
+- **Telegram Access**: The bot is designed to be personal and only responds to users in the `TELEGRAM_ALLOWED_USERS` list in the .env file. This is intentional for privacy and security.
+- **Bluesky Integration**: The bot only supports posting to your Bluesky account (not reading from it). Credentials are optional and can be left blank if you don't want this functionality.
+- **Data Storage**: All data is stored locally in SQLite databases (journal.db and memory.db) on your device.
 
 ## How to Run
 
@@ -183,7 +192,8 @@ Micchon/                         # Root directory
     │   ├── journal_compiler.py  # Draft → article compilation
     │   ├── bluesky_client.py    # Bluesky integration
     │   ├── fine_tuner.py        # LoRA fine-tuning
-    │   └── scheduler.py         # Scheduled tasks
+    │   ├── scheduler.py         # Scheduled tasks (fine-tune 2AM, cleanup 3AM)
+    │   └── keyword_manager.py   # Dynamic keyword/interest tracking
     ├── memory/
     │   ├── __init__.py
     │   ├── models.py            # Data models
@@ -213,7 +223,7 @@ Micchon/                         # Root directory
 | `/journal cancel` | Exit journal mode, discard entries |
 | `/journal status` | Show current journal session info |
 | `/journal preview` | Preview entries before compiling |
-| `/bsky <text>` | Post to Bluesky (AI-polished) |
+| `/bsky <text>` | Post to Bluesky (AI-polished) - requires credentials in .env |
 | `/voice` | Toggle voice responses on/off |
 | `/rate <1-5>` | Rate the last AI response |
 | `/status` | Show system status |

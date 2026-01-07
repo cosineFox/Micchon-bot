@@ -8,17 +8,22 @@ from apscheduler.triggers.cron import CronTrigger
 
 from .fine_tuner import FineTuner
 from .model_manager import ModelManager
+from .maintenance import get_maintenance_manager
+from memory.master_repo import MasterRepository
+import config
 
 logger = logging.getLogger(__name__)
 
 
 class TaskScheduler:
-    """Schedules recurring tasks like fine-tuning"""
+    """Schedules recurring tasks like fine-tuning and cleanup"""
 
     def __init__(
         self,
         fine_tuner: FineTuner,
         model_manager: ModelManager,
+        master_repo: MasterRepository,
+        cleanup_days: int = 90,
         fine_tune_hour: int = 2,
         fine_tune_minute: int = 0,
         on_fine_tune_complete: Optional[Callable[[str], Awaitable[None]]] = None
@@ -29,15 +34,20 @@ class TaskScheduler:
         Args:
             fine_tuner: FineTuner instance
             model_manager: ModelManager for hot-swapping models
+            master_repo: MasterRepository for cleanup operations
+            cleanup_days: Days to keep memories (older are deleted)
             fine_tune_hour: Hour to run fine-tuning (0-23)
             fine_tune_minute: Minute to run fine-tuning (0-59)
             on_fine_tune_complete: Callback when fine-tuning completes
         """
         self.fine_tuner = fine_tuner
         self.model_manager = model_manager
+        self.master_repo = master_repo
+        self.cleanup_days = cleanup_days
         self.fine_tune_hour = fine_tune_hour
         self.fine_tune_minute = fine_tune_minute
         self.on_complete = on_fine_tune_complete
+        self.maintenance = get_maintenance_manager(config.DATA_DIR)
 
         self._scheduler = AsyncIOScheduler()
         self._is_running = False
@@ -57,6 +67,15 @@ class TaskScheduler:
             ),
             id="fine_tuning",
             name="Daily Fine-Tuning",
+            replace_existing=True
+        )
+
+        # Schedule maintenance job (Backup + Integrity Check) at 2:30 AM
+        self._scheduler.add_job(
+            self.maintenance.run_maintenance,
+            CronTrigger(hour=2, minute=30),
+            id="maintenance",
+            name="Database Maintenance",
             replace_existing=True
         )
 
@@ -96,8 +115,8 @@ class TaskScheduler:
                 logger.info(f"Skipping fine-tuning: {reason}")
                 return
 
-            # Run fine-tuning
-            adapter_path = await self.fine_tuner.run_fine_tuning()
+            # Run fine-tuning with GGUF merging enabled
+            adapter_path = await self.fine_tuner.run_fine_tuning(merge_to_gguf=True)
 
             if adapter_path:
                 logger.info(f"Fine-tuning complete: {adapter_path}")
@@ -106,9 +125,14 @@ class TaskScheduler:
                 if self.on_complete:
                     await self.on_complete(f"Fine-tuning complete: {adapter_path.name}")
 
-                # Note: Model hot-swap would happen here if using adapters
-                # For GGUF models, you would need to merge LoRA and convert
-                # This is left as a placeholder for future enhancement
+                # If we have a merged model and a model manager, update the model
+                if adapter_path.suffix == '.gguf' and self.model_manager:
+                    logger.info(f"Updating model with new GGUF: {adapter_path}")
+                    try:
+                        await self.model_manager.update_model_from_path(adapter_path)
+                        logger.info("Model updated successfully")
+                    except Exception as e:
+                        logger.error(f"Failed to update model: {e}")
 
             else:
                 logger.warning("Fine-tuning did not produce an adapter")
@@ -117,13 +141,11 @@ class TaskScheduler:
             logger.error(f"Fine-tuning job failed: {e}")
 
     async def _run_cleanup(self):
-        """Run daily cleanup tasks"""
-        logger.info("Running daily cleanup...")
+        """Run daily cleanup tasks - deletes old memories and embeddings"""
+        logger.info(f"Running daily cleanup (keeping last {self.cleanup_days} days)...")
 
         try:
-            # Cleanup old embeddings (implemented in master_repo)
-            # This is just a placeholder - actual cleanup should be called
-
+            await self.master_repo.cleanup_old_memories(days=self.cleanup_days)
             logger.info("Daily cleanup complete")
 
         except Exception as e:
@@ -174,6 +196,8 @@ _scheduler: Optional[TaskScheduler] = None
 def get_scheduler(
     fine_tuner: FineTuner,
     model_manager: ModelManager,
+    master_repo: MasterRepository,
+    cleanup_days: int = 90,
     fine_tune_hour: int = 2
 ) -> TaskScheduler:
     """Get or create global scheduler"""
@@ -183,6 +207,8 @@ def get_scheduler(
         _scheduler = TaskScheduler(
             fine_tuner=fine_tuner,
             model_manager=model_manager,
+            master_repo=master_repo,
+            cleanup_days=cleanup_days,
             fine_tune_hour=fine_tune_hour
         )
 

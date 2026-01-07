@@ -1,0 +1,44 @@
+# Core
+python-telegram-bot>=21.0
+aiosqlite>=0.19.0
+python-dotenv>=1.0.0
+
+# LLM - Install with CUDA for best performance:
+# CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
+llama-cpp-python>=0.2.0
+
+# PyTorch - Required for GPU embeddings
+# Install with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0
+
+# Embeddings (runs on GPU if available)
+sentence-transformers>=3.0.0
+
+# TTS - Install from GitHub (NOT PyPI):
+# pip install git+https://github.com/resemble-ai/chatterbox.git
+torchaudio>=2.0.0
+pydub>=0.25.0
+
+# Vector search
+sqlite-vec>=0.1.0
+
+# Bluesky
+atproto>=0.0.55
+
+# Image processing
+Pillow>=10.0.0
+
+# Scheduling
+APScheduler>=3.10.0
+
+# Utilities
+numpy>=1.24.0
+cachetools>=5.3.0
+
+# Fine-tuning (DISABLED by default - very resource intensive)
+# Only install if you have 24GB+ VRAM and want to enable FINE_TUNE_ENABLED
+# pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+# datasets>=2.14.0
+# trl>=0.7.0
+# peft>=0.6.0
+# transformers>=4.35.0
