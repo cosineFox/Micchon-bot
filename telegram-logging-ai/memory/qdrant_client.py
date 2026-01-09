@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Union
 from uuid import UUID
 
 from qdrant_client import QdrantClient, models
@@ -13,39 +14,44 @@ COLLECTION_NAME = "memories"
 
 
 class QdrantMemoryStore:
-    """Qdrant vector store for memory embeddings"""
+    """Qdrant vector store for memory embeddings (Edge/embedded mode)"""
 
     def __init__(
         self,
-        host: str = "localhost",
-        port: int = 6333,
+        path: Optional[Union[str, Path]] = None,
         embedding_dimension: int = 384,
         distance: Distance = Distance.COSINE
     ):
         """
-        Initialize Qdrant client
+        Initialize Qdrant client in embedded mode (no server needed)
 
         Args:
-            host: Qdrant server host
-            port: Qdrant server port
+            path: Local path for persistent storage, or None for in-memory
             embedding_dimension: Vector dimension
             distance: Distance metric (COSINE, EUCLID, DOT)
         """
-        self.host = host
-        self.port = port
+        self.path = str(path) if path else None
         self.embedding_dimension = embedding_dimension
         self.distance = distance
         self._client: Optional[QdrantClient] = None
         self._initialized = False
 
     async def _get_client(self) -> QdrantClient:
-        """Get or create Qdrant client"""
+        """Get or create Qdrant client in embedded mode"""
         if self._client is None:
             loop = asyncio.get_event_loop()
-            self._client = await loop.run_in_executor(
-                None,
-                lambda: QdrantClient(host=self.host, port=self.port)
-            )
+
+            def _create_client():
+                if self.path:
+                    # Persistent embedded mode - data saved to disk
+                    Path(self.path).mkdir(parents=True, exist_ok=True)
+                    return QdrantClient(path=self.path)
+                else:
+                    # In-memory mode - fast but not persistent
+                    return QdrantClient(":memory:")
+
+            self._client = await loop.run_in_executor(None, _create_client)
+            logger.info(f"Qdrant Edge initialized: {self.path or 'in-memory'}")
         return self._client
 
     async def init(self):
@@ -242,10 +248,16 @@ class QdrantMemoryStore:
 
             def _info():
                 info = client.get_collection(COLLECTION_NAME)
+                # Handle different qdrant-client versions
+                vectors_count = getattr(info, 'vectors_count', None)
+                if vectors_count is None:
+                    vectors_count = getattr(info, 'points_count', 0)
+                points_count = getattr(info, 'points_count', vectors_count)
+                status = getattr(info.status, 'name', str(info.status)) if hasattr(info, 'status') else 'unknown'
                 return {
-                    "vectors_count": info.vectors_count,
-                    "points_count": info.points_count,
-                    "status": info.status.name,
+                    "vectors_count": vectors_count or 0,
+                    "points_count": points_count or 0,
+                    "status": status,
                     "dimension": self.embedding_dimension
                 }
 
@@ -276,17 +288,15 @@ _qdrant_store: Optional[QdrantMemoryStore] = None
 
 
 def get_qdrant_store(
-    host: str = "localhost",
-    port: int = 6333,
+    path: Optional[Union[str, Path]] = None,
     embedding_dimension: int = 384
 ) -> QdrantMemoryStore:
-    """Get or create global Qdrant store"""
+    """Get or create global Qdrant store (Edge/embedded mode)"""
     global _qdrant_store
 
     if _qdrant_store is None:
         _qdrant_store = QdrantMemoryStore(
-            host=host,
-            port=port,
+            path=path,
             embedding_dimension=embedding_dimension
         )
 

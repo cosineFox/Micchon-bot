@@ -56,6 +56,14 @@ class Embedder:
         self.device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
         logger.info(f"Embedder initialized (GGUF: {self._is_gguf})")
 
+    def _normalize_text(self, text: str) -> str:
+        """Normalize text for cache key"""
+        return text.strip().lower()[:500]  # Limit cache key size
+
+    def _format_text(self, text: str) -> str:
+        """Format text for embedding model"""
+        return text.strip()
+
     def _get_model(self):
         """Lazy load model"""
         if self._model is None:
@@ -70,7 +78,11 @@ class Embedder:
                 )
             else:
                 logger.info(f"Loading SentenceTransformer: {self.model_name}")
-                self._model = SentenceTransformer(self.model_name, device=self.device)
+                self._model = SentenceTransformer(
+                    self.model_name,
+                    device=self.device,
+                    trust_remote_code=True
+                )
             
             logger.info("Embedding model loaded")
         return self._model

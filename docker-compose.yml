@@ -1,23 +1,7 @@
 version: '3.8'
 
 services:
-  # Qdrant vector database
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: micchon-qdrant
-    ports:
-      - "6333:6333"
-      - "6334:6334"  # gRPC port
-    volumes:
-      - qdrant_data:/qdrant/storage
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Telegram bot with Waifu AI
+  # Telegram bot with Waifu AI (Qdrant Edge embedded - no external DB needed)
   bot:
     build:
       context: .
@@ -26,16 +10,11 @@ services:
     env_file:
       - telegram-logging-ai/.env
     environment:
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
       - DATA_DIR=/app/data
       - TTS_ENABLED=true
     volumes:
       - ./telegram-logging-ai/data:/app/data
       - ./telegram-logging-ai/models:/app/models
-    depends_on:
-      qdrant:
-        condition: service_healthy
     restart: unless-stopped
     # Uncomment for NVIDIA GPU support
     # deploy:
@@ -45,6 +24,3 @@ services:
     #         - driver: nvidia
     #           count: 1
     #           capabilities: [gpu]
-
-volumes:
-  qdrant_data:

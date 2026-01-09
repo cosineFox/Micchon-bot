@@ -19,7 +19,7 @@ async def test_config():
         import config
         print(f"  Telegram token: {'set' if config.TELEGRAM_BOT_TOKEN else 'NOT SET'}")
         print(f"  Allowed chats: {config.TELEGRAM_ALLOWED_CHAT_IDS or 'NOT SET'}")
-        print(f"  Qdrant: {config.QDRANT_HOST}:{config.QDRANT_PORT}")
+        print(f"  Qdrant Edge: {config.QDRANT_PATH}")
         print(f"  TTS enabled: {config.TTS_ENABLED}")
         print(f"  Data dir: {config.DATA_DIR}")
         print("  [OK] Config loaded")
@@ -30,27 +30,26 @@ async def test_config():
 
 
 async def test_qdrant():
-    """Test Qdrant connection"""
+    """Test Qdrant Edge (embedded mode)"""
     print("=" * 50)
-    print("Testing Qdrant connection...")
+    print("Testing Qdrant Edge...")
     try:
         from memory.qdrant_client import get_qdrant_store
         import config
 
         qdrant = get_qdrant_store(
-            host=config.QDRANT_HOST,
-            port=config.QDRANT_PORT,
+            path=config.QDRANT_PATH,
             embedding_dimension=config.EMBEDDING_DIMENSION
         )
         await qdrant.init()
         info = await qdrant.get_collection_info()
+        print(f"  Storage: {config.QDRANT_PATH}")
         print(f"  Collection status: {info.get('status', 'unknown')}")
         print(f"  Vectors count: {info.get('vectors_count', 0)}")
-        print("  [OK] Qdrant connected")
+        print("  [OK] Qdrant Edge initialized")
         return True
     except Exception as e:
         print(f"  [FAIL] Qdrant error: {e}")
-        print("  Hint: Run 'docker run -p 6333:6333 qdrant/qdrant'")
         return False
 
 

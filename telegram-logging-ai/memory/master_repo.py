@@ -19,21 +19,18 @@ class MasterRepository:
         self,
         db_path: Path,
         embedding_dimension: int = 384,
-        qdrant_host: str = "localhost",
-        qdrant_port: int = 6333
+        qdrant_path: Optional[Path] = None
     ):
         self.db_path = db_path
         self.embedding_dimension = embedding_dimension
-        self.qdrant_host = qdrant_host
-        self.qdrant_port = qdrant_port
+        self.qdrant_path = qdrant_path
         self._qdrant: Optional[QdrantMemoryStore] = None
 
     async def _get_qdrant(self) -> QdrantMemoryStore:
-        """Get or create Qdrant store"""
+        """Get or create Qdrant store (Edge/embedded mode)"""
         if self._qdrant is None:
             self._qdrant = get_qdrant_store(
-                host=self.qdrant_host,
-                port=self.qdrant_port,
+                path=self.qdrant_path,
                 embedding_dimension=self.embedding_dimension
             )
             await self._qdrant.init()

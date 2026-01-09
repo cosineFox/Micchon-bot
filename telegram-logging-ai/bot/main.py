@@ -172,8 +172,7 @@ async def main():
     master_repo = MasterRepository(
         config.MASTER_DB_PATH,
         embedding_dimension=config.EMBEDDING_DIMENSION,
-        qdrant_host=config.QDRANT_HOST,
-        qdrant_port=config.QDRANT_PORT
+        qdrant_path=config.QDRANT_PATH
     )
     await master_repo.init_db()
 
